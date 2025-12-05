@@ -1,0 +1,42 @@
+Dane pomiarowe prezentowane w poni¿szych katalogach, nale¿y traktowaæ jako dane operacyjne.
+
+Dane pomiarowe w plikach pochodz¹ z automatycznych stacji pomiarowych, stan bie¿¹cy stacji pomiarowej jak i po³o¿enie, mo¿na œledziæ na stronie http://monitor.pogodynka.pl.
+Dane pomiarowe nap³ywaj¹ do bazy danych zwanej System Hydrologii (w skrócie SH), podstawowej aplikacji operacyjnej Biur Prognoz Hydrologicznych. Gdzie nastêpuje wstêpna, operacyjna weryfikacja danych.
+
+Plik zosta³y wygenerowane przez System Hydrologii, w standardowym pliku eksportu.
+Jest to plik tekstowy w formacie kolumnowym, rozdzielony œrednikiem. Struktura pliku to:
+
+ Kolumna 1 - KodSH – 9-cyfrowy kod stacji pomiarowej, stosowany w IMGW PIB do identyfikacji stacji pomiarowej,
+ Kolumna 2 - ParametrSH – parametr pomiarowy, stosowany w Systemie Hydrologii,
+ Kolumna 3 - Data – czas w którym zosta³a zaobserwowana wartoœæ pomiarowa,
+ Kolumna 4 - Wartoœæ – wartoœæ pomiarowa.
+
+Ka¿da stacja pomiarowa reprezentowana jest poprzez kod, nazwê, oraz rzekê. Kod SH identyfikuje typ stacji pomiarowej:
+ 1XXXXXXXX -  stacja wodowskazowa, 
+ 2XXXXXXXX -  stacja meteorologiczna, ni¿szego rzêdu, o mniejszej liczbie parametrów pomiarowych,
+ 3XXXXXXXX – stacja meteorologiczna I rzêdu (tzw. synoptyczna), o pe³ny zakresie pomiarowym.
+Lista stacji znajduje siê w pliku kody_stacji.csv.
+
+Parametr SH, stosowany w Systemie Hydrologii, identyfikuje jakie to s¹ dane pomiarowe.
+Pocz¹tkowa literka oznacza typ danych (dane rzeczywiste, prognoza), np. B – dana rzeczywista.
+Trzy pierwsze cyfry, oznaczaj¹ grupê pomiarow¹ np. 000 – pomiar stanów wody, 003 – pomiar temperatury powietrza. Dwie kolejne, okreœlaj¹ dok³adnie jaki parametr np. 01 – dana pomiarowa od obserwatora, 02 – dana pomiarowa z czujnika.
+Ostatnia litera oznacza czy wartoœæ pomiarowa jest bezpoœrednio zaobserwowana, czy przetworzona w SH:
+ A - Bezpoœrednio zaobserwowana dana pomiarowa,
+ B - Wartoœæ pomiarowa  przeliczona np. przep³yw wody,
+ S – Oficjalna wartoœæ operacyjna.
+Lista parametrów znajduje siê w pliku kody_parametrów.csv.
+
+Czas pomiaru podawany jest w czasie uniwersalnym (GMT), bez uwzglêdnienia czasu lokalnego oraz zmian czas letni/czas zimowy. 
+W IMGW PIB, stosowana jest 10 minutowa rozdzielczoœæ czasowa danych pomiarowych pochodz¹cychz Systemu Telemetrii (ST).
+
+Wartoœæ pomiarowa podawana jest z dok³adnoœci¹ zdefiniowan¹ dla poszczególnych parametrów, wynikaj¹ca z dok³adnoœci urz¹dzeñ pomiarowych.
+Braki danych mog¹ wynikaæ z wstêpnej weryfikacji danych, lub awarii urz¹dzenia pomiarowego. Jak równie¿ u¿ale¿nione jest od daty uruchomienia stacji.
+Zakres danych pomiarowych prezentowany jest od roku 2008. Zgodnie z zarz¹dzeniem dyrektora IMGW PIB w tym roku, dane pomiarowe z sieci stacji telemetrycznych, zosta³y dopuszczone do u¿ytkowania.
+
+W pierwszej kolejnoœci pliki podzielono zewzgledu na rodzaj danych, osobne katalogi:
+ Hydro - hydrologiczne,
+ Meteo - meteorologiczne.
+W nich znajduj¹ siê katalogii odpowiadaj¹ce roku pomiaru oraz pliki z kodami stacji i parametrów.
+Dane pomiarowe s¹ porcjonowane miesiêcznie, ka¿dy parametr jako osobny plik. Pliki z danego miesi¹ca s¹ spakowane w standarcie zip.
+
+Pliki z danymi 10 minutowymi, posiadaj¹ du¿¹ liczbê rekordów (powy¿ej 2 miliona), dlatego nie rekomendujemy dla takich plików przegl¹danie ich w popularnym programach kalkulacyjnych np. Excel, poniewa¿ posiadaj¹ ograniczenia wyœwietlania rekordów (1 milion).
