@@ -8,6 +8,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 import geopandas as gpd
+import matplotlib
+matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 
 from scipy.stats import trim_mean
@@ -15,7 +18,6 @@ from astral import LocationInfo
 from astral.sun import sun
 import pytz
 import matplotlib
-matplotlib.use("Agg")
 
 
 # ================== KONFIGURACJA ==================
