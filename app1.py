@@ -1,10 +1,10 @@
 import os
 import glob
 import zipfile
-import warnings
 import requests
 from io import BytesIO
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 import geopandas as gpd
@@ -14,6 +14,9 @@ from scipy.stats import trim_mean
 from astral import LocationInfo
 from astral.sun import sun
 import pytz
+import matplotlib
+matplotlib.use("Agg")
+
 
 # ================== KONFIGURACJA ==================
 
@@ -73,143 +76,127 @@ def download_imgw_data(year, month):
 # ================== 2. PANDAS ==================
 
 def read_parameter_csvs(year_months, parameter_code):
-    data = []
-
+    files = []
     for ym in year_months:
-        for f in glob.glob(os.path.join(DANE_METEO_DIR, ym, "*.csv")):
-            df = pd.read_csv(
-                f, header=None, delimiter=";",
-                usecols=[0,1,2,3],
-                names=["KodSH","ParametrSH","Data","Value"],
-                dtype=str, on_bad_lines="skip"
+        files.extend(glob.glob(os.path.join(DANE_METEO_DIR, ym, "*.csv")))
+
+    if not files:
+        return pd.DataFrame()
+
+    df = pd.concat(
+        (
+            pd.read_csv(
+                f,
+                header=None,
+                delimiter=";",
+                usecols=[0, 1, 2, 3],
+                names=["KodSH", "ParametrSH", "Data", "Value"],
+                dtype=str,
+                on_bad_lines="skip"
             )
+            for f in files
+        ),
+        ignore_index=True
+    )
 
-            df = df[df["ParametrSH"] == parameter_code]
-            if df.empty:
-                continue
+    df = df[df["ParametrSH"] == parameter_code]
+    if df.empty:
+        return pd.DataFrame()
 
-            df["Value"] = df["Value"].str.replace(",", ".").astype(float)
-            df["datetime"] = pd.to_datetime(df["Data"], errors="coerce")
-            df = df.dropna()
+    df["Value"] = df["Value"].str.replace(",", ".").astype(float)
+    df["datetime"] = pd.to_datetime(df["Data"], errors="coerce")
 
-            data.append(df[["KodSH","datetime","Value"]])
-
-    return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
+    return df[["KodSH", "datetime", "Value"]].dropna()
 
 # ================== 3. DZIEŃ / NOC ==================
 
 def add_day_night_astral(df, eff):
     eff = eff.to_crs(4326)
-    eff["KodSH"] = eff.iloc[:,0].astype(str)
+    eff["KodSH"] = eff.iloc[:, 0].astype(str)
     df["KodSH"] = df["KodSH"].astype(str)
 
-    df = df.merge(eff[["KodSH","geometry"]], on="KodSH", how="left")
+    df = df.merge(eff[["KodSH", "geometry"]], on="KodSH", how="left")
     tz = pytz.timezone("Europe/Warsaw")
 
     df["date"] = df["datetime"].dt.date
-    df["dt_local"] = df["datetime"].apply(tz.localize)
 
-    cache = {}
+    sun_cache = {}
 
-    def get_sun(kod, geom, d):
+    def get_sun_times(kod, geom, d):
         key = (kod, d)
-        if key in cache:
-            return cache[key]
+        if key in sun_cache:
+            return sun_cache[key]
 
-    # BRAK GEOMETRII → brak możliwości wyznaczenia dnia/nocy
-        if geom is None or geom.is_empty:   
-            cache[key] = (None, None)
-            return cache[key]
-
-        loc = LocationInfo(latitude=geom.y, longitude=geom.x)
-        s = sun(loc.observer, date=d, tzinfo=tz)
-
-        cache[key] = (s["sunrise"], s["sunset"])
-        return cache[key]
-
-    period = []
-    for k, g, d, dt in zip(df.KodSH, df.geometry, df.date, df.dt_local):
-        sunrise, sunset = get_sun(k, g, d)
-
-        if sunrise is None:
-            period.append("noc")
-        elif sunrise <= dt <= sunset:
-            period.append("dzien")
+        if geom is None or geom.is_empty:
+            sun_cache[key] = (None, None)
         else:
-            period.append("noc")
+            loc = LocationInfo(latitude=geom.y, longitude=geom.x)
+            s = sun(loc.observer, date=d, tzinfo=tz)
+            sun_cache[key] = (s["sunrise"], s["sunset"])
+        return sun_cache[key]
 
-    df["period"] = period
-    return df.drop(columns=["geometry","dt_local"])
+    for _, r in df[["KodSH", "date", "geometry"]].drop_duplicates().iterrows():
+        get_sun_times(r["KodSH"], r["geometry"], r["date"])
+
+    df["sun_key"] = list(zip(df["KodSH"], df["date"]))
+    sun_df = pd.DataFrame(
+        [{"sun_key": k, "sunrise": v[0], "sunset": v[1]} for k, v in sun_cache.items()]
+    )
+
+    df = df.merge(sun_df, on="sun_key", how="left")
+
+    df["dt_local"] = (
+        df["datetime"]
+        .dt.tz_localize("UTC", ambiguous="NaT", nonexistent="NaT")
+        .dt.tz_convert(tz)
+    )
+
+    df["period"] = "noc"
+    mask = (
+        df["sunrise"].notna()
+        & (df["dt_local"] >= df["sunrise"])
+        & (df["dt_local"] <= df["sunset"])
+    )
+    df.loc[mask, "period"] = "dzien"
+
+    return df.drop(columns=["geometry", "dt_local", "sun_key", "sunrise", "sunset"])
 
 # ================== 4. STATYSTYKI ==================
 
 def compute_stats(df):
-    g = df.groupby(["KodSH","date","period"])["Value"]
-
+    g = df.groupby(["KodSH", "date", "period"])["Value"]
     stats = g.agg(mean="mean", median="median", count="count").reset_index()
     trimmed = g.apply(lambda x: trim_mean(x, TRIM_PROP)).rename("trimmed_mean").reset_index()
-
-    return stats.merge(trimmed, on=["KodSH","date","period"])
+    return stats.merge(trimmed, on=["KodSH", "date", "period"])
 
 # ================== 5. GEOANALIZA ==================
 
 def aggregate_by_admin(stats, eff, admin, admin_id, prefix):
-    """
-    Agregacja statystyk stacji do jednostek administracyjnych
-    z automatycznym wykrywaniem pola ID stacji w effacility.
-    """
-
-    # === 1. Wykryj pole ID stacji w eff ===
-    code_field = None
-    for c in ["KodSH", "ifcid", "IFCID", "kod", "station_id", "id"]:
-        if c in eff.columns:
-            code_field = c
-            break
-
+    code_field = next((c for c in ["KodSH", "ifcid", "IFCID", "kod", "station_id", "id"] if c in eff.columns), None)
     if code_field is None:
-        raise KeyError("Nie znaleziono pola ID stacji w effacility.geojson")
+        raise KeyError("Brak pola ID stacji w effacility")
 
-    # === 2. Przygotuj geometrie stacji ===
-    eff2 = eff[[code_field, "geometry"]].copy()
-    eff2 = eff2.to_crs(admin.crs)
-
+    eff2 = eff[[code_field, "geometry"]].copy().to_crs(admin.crs)
     eff2[code_field] = eff2[code_field].astype(str)
     stats["KodSH"] = stats["KodSH"].astype(str)
 
-    # === 3. Merge statystyki + geometria stacji ===
-    gdf = stats.merge(
-        eff2,
-        left_on="KodSH",
-        right_on=code_field,
-        how="left"
+    gdf = gpd.GeoDataFrame(
+        stats.merge(eff2, left_on="KodSH", right_on=code_field, how="left"),
+        geometry="geometry",
+        crs=admin.crs
     )
 
-    gdf = gpd.GeoDataFrame(gdf, geometry="geometry", crs=admin.crs)
-
-    # === 4. Przygotuj jednostki administracyjne ===
-    admin2 = admin[[admin_id, "geometry"]].copy()
-    if admin2.crs != gdf.crs:
-        admin2 = admin2.to_crs(gdf.crs)
-
-    # === 5. Spatial join ===
+    admin2 = admin[[admin_id, "geometry"]].to_crs(gdf.crs)
     joined = gpd.sjoin(gdf, admin2, predicate="within")
 
-    # === 6. Agregacja ===
-    agg = joined.groupby(
-        [admin_id, "date", "period"], as_index=False
-    ).agg(
+    agg = joined.groupby([admin_id, "date", "period"], as_index=False).agg(
         mean=("mean", "mean"),
         median=("median", "median"),
         trimmed_mean=("trimmed_mean", "mean"),
         count=("count", "sum")
     )
 
-    # === 7. Zapis ===
-    agg.to_csv(
-        os.path.join(OUTPUT_DIR, f"{prefix}.csv"),
-        index=False
-    )
-
+    agg.to_csv(os.path.join(OUTPUT_DIR, f"{prefix}.csv"), index=False)
     return agg
 
 def compute_changes(df, admin_id):
@@ -217,20 +204,20 @@ def compute_changes(df, admin_id):
     df = df.set_index("date")
 
     res = (
-        df.groupby([admin_id,"period"])
+        df.groupby([admin_id, "period"])
         .resample(CHANGE_FREQ)
-        .agg(mean=("mean","mean"), median=("median","median"))
+        .agg(mean=("mean", "mean"), median=("median", "median"))
         .reset_index()
     )
 
-    res["mean_change"] = res.groupby([admin_id,"period"])["mean"].diff()
-    res["median_change"] = res.groupby([admin_id,"period"])["median"].diff()
+    res["mean_change"] = res.groupby([admin_id, "period"])["mean"].diff()
+    res["median_change"] = res.groupby([admin_id, "period"])["median"].diff()
     return res
 
 # ================== 6. WIZUALIZACJA ==================
 
 def plot_changes(changes, admin_id, fname):
-    sample = changes.dropna().head(1)[admin_id].iloc[0]
+    sample = changes.dropna().iloc[0][admin_id]
     d = changes[changes[admin_id] == sample]
 
     plt.plot(d["date"], d["mean_change"], label="Zmiana średniej")
@@ -239,6 +226,22 @@ def plot_changes(changes, admin_id, fname):
     plt.title("Zmiany wartości w czasie")
     plt.savefig(os.path.join(OUTPUT_DIR, fname), dpi=150)
     plt.close()
+
+def process_parameter(code, name, ym, eff, voiv, county):
+    obs = read_parameter_csvs([ym], code)
+    if obs.empty:
+        return
+
+    obs = add_day_night_astral(obs, eff.copy())
+    stats = compute_stats(obs)
+    stats.to_csv(os.path.join(OUTPUT_DIR, f"station_{code}.csv"), index=False)
+
+    v = aggregate_by_admin(stats, eff, voiv, "id", f"{code}_voiv")
+    vc = compute_changes(v, "id")
+    vc.to_csv(os.path.join(OUTPUT_DIR, f"{code}_voiv_changes.csv"), index=False)
+
+    if not vc.empty:
+        plot_changes(vc, "id", f"{code}_voiv_changes.png")
 
 # ================== MAIN ==================
 
@@ -251,31 +254,17 @@ def run(year, month):
     voiv = gpd.read_file(ADMIN_VOIV_PATH)
     county = gpd.read_file(ADMIN_COUNTY_PATH)
 
-    for code, name in PARAMETERS.items():
-        obs = read_parameter_csvs([ym], code)
-        if obs.empty:
-            continue
-
-        obs = add_day_night_astral(obs, eff)
-        stats = compute_stats(obs)
-
-        stats.to_csv(os.path.join(OUTPUT_DIR, f"station_{code}.csv"), index=False)
-
-        v = aggregate_by_admin(stats, eff, voiv, "id", f"{code}_voiv")
-        p = aggregate_by_admin(stats, eff, county, "id", f"{code}_county")
-
-        vc = compute_changes(v, "id")
-        pc = compute_changes(p, "id")
-
-        vc.to_csv(os.path.join(OUTPUT_DIR, f"{code}_voiv_changes.csv"), index=False)
-        pc.to_csv(os.path.join(OUTPUT_DIR, f"{code}_county_changes.csv"), index=False)
-
-        plot_changes(vc, "id", f"{code}_voiv_changes.png")
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        for f in [
+            ex.submit(process_parameter, code, name, ym, eff, voiv, county)
+            for code, name in PARAMETERS.items()
+        ]:
+            f.result()
 
 if __name__ == "__main__":
-    warnings.filterwarnings("ignore")
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Analiza danych IMGW")
     parser.add_argument("--year", type=int, required=True)
     parser.add_argument("--month", type=int, required=True)
     args = parser.parse_args()
+
     run(args.year, args.month)
