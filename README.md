@@ -45,13 +45,15 @@ PAG2_Projekt2/
 ├── db_connection.py      # Moduł połączeń z MongoDB i Redis
 ├── import_data.py        # Import danych do baz
 ├── app1.py               # Skrypt analizy danych IMGW
-├── check_databases.py    # Test połączeń z bazami
 ├── setup_databases.ps1   # Instalacja i uruchomienie portable MongoDB/Redis
 ├── stop_databases.ps1    # Zatrzymanie baz danych
 ├── requirements.txt      # Zależności Python
 ├── Dane_administracyjne/ # Pliki shapefile (województwa, powiaty, stacje)
+│   ├── effacility.geojson
+│   ├── woj.*             # Dane województw
+│   └── powiaty.*         # Dane powiatów
 ├── dane_meteo/           # Pobrane dane meteorologiczne IMGW
-├── img/                  # Obrazki dla GUI
+├── img/                  # Obrazki dla GUI (moon, sun, thermometer, rain, wind)
 └── portable_databases/   # Portable MongoDB i Redis
     ├── mongodb/
     ├── redis/
@@ -61,20 +63,26 @@ PAG2_Projekt2/
 ## Funkcjonalności
 
 ### GUI (`main_gui.py`)
+- Nowoczesny interfejs z ciemnym motywem
 - Wybór daty z kalendarza
-- Wybór województwa lub powiatu
+- Wybór województwa lub powiatu z listy rozwijanej
 - Obliczanie statystyk meteorologicznych (średnia, mediana)
 - Podział na dzień/noc (na podstawie wschodu/zachodu słońca)
-- Cache wyników w Redis
+- Wizualizacja wyników w trzech kolumnach: Temperatura, Opad, Wiatr
+- Cache wyników w Redis z możliwością czyszczenia
+- Pasek statusu informujący o aktualnych operacjach
 
 ### Parametry meteorologiczne
-- Temperatura powietrza (B00300S)
-- Temperatura gruntu (B00305A)
-- Wilgotność względna (B00802A)
-- Prędkość wiatru (B00702A)
-- Kierunek wiatru (B00202A)
-- Opad dobowy, godzinowy, 10-minutowy
-- Maksymalna prędkość wiatru i porywy
+- **Temperatura powietrza** (B00300S) - średnia i mediana [°C]
+- **Temperatura gruntu** (B00305A) - średnia i mediana [°C]
+- **Wilgotność względna** (B00802A) - średnia i mediana [%]
+- **Prędkość wiatru** (B00702A) - średnia i mediana [m/s]
+- **Kierunek wiatru** (B00202A) - średnia i mediana [°]
+- **Opad dobowy** (B00608S) - suma [mm]
+- **Opad godzinowy** (B00606S) - średnia i mediana [mm]
+- **Opad 10-minutowy** (B00604S) - średnia i mediana [mm]
+- **Maksymalna prędkość wiatru** (B00703A) - średnia i mediana [m/s]
+- **Największy poryw wiatru** (B00714A) - wartość maksymalna [m/s]
 
 ### Bazy danych
 - **MongoDB**: stacje meteorologiczne, jednostki administracyjne, statystyki
@@ -86,10 +94,12 @@ PAG2_Projekt2/
 .\stop_databases.ps1
 ```
 
-## Funkcjonalności
+## Schemat kolorów GUI
 
-- Połączenie z MongoDB do przechowywania danych meteorologicznych
-- Cache Redis do przyspieszenia zapytań
-- GUI do wyboru województwa/powiatu i daty
-- Wyświetlanie statystyk: średnia, mediana (dzień/noc)
-- Parametry: temperatura, opad, wiatr, wilgotność
+Aplikacja wykorzystuje spójny ciemny motyw:
+- Tło główne: `#1a1a2e`
+- Tło ramek: `#1e2a4a`
+- Akcenty: `#e94560` (czerwony/różowy)
+- Temperatura: `#ff6b6b`
+- Opad: `#4facfe`
+- Wiatr: `#a8edea`
